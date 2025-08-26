@@ -14,7 +14,9 @@
     header h1{font-size:1.1rem;margin:0;font-weight:600}
     main{max-width:1200px;margin:0 auto;padding:1rem;display:grid;gap:1rem}
     .viewer{background:var(--card);border-radius:16px;padding:1rem;display:grid;gap:1rem;box-shadow:0 10px 30px rgba(0,0,0,.2)}
-    #flipbook{height:min(82vh,1000px)}
+    #flipbook{height:min(82vh,1000px);width:100%;overflow:hidden;position:relative}
+    /* Evita que se muestren las páginas en columna antes de inicializar PageFlip */
+    .page{display:none}
     .toolbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:space-between}
     .left, .right{display:flex;gap:.5rem;align-items:center}
     button{appearance:none;background:#1f2937;color:var(--text);border:1px solid #374151;border-radius:10px;padding:.6rem .9rem;font-weight:600;cursor:pointer}
@@ -146,8 +148,7 @@
         }
 
         const images = await renderPdfToImages(pdfUrl);
-        makePageElements(images);
-
+        // Inicializa PageFlip directamente con las imágenes (evita HTML apilado)
         const pageFlip = new St.PageFlip(container, {
           width: 800,
           height: 1050,
@@ -160,7 +161,7 @@
           usePortrait: true,
           disableFlipByClick: false
         });
-        pageFlip.loadFromHTML(document.querySelectorAll(".page"));
+        pageFlip.loadFromImages(images);
 
         prevBtn.onclick = () => pageFlip.flipPrev();
         nextBtn.onclick = () => pageFlip.flipNext();
@@ -180,7 +181,13 @@
         console.error(err);
         showError(
           "Error: " + err.message +
-          "\n\nSolución rápida:\n1) Asegúrate de que el PDF esté en el MISMO directorio que index.html y se llame 'catalogo.pdf'.\n   O usa '?pdf=RUTA/AL/ARCHIVO.pdf' en la URL.\n2) Si usas carpeta 'docs/', mueve ambos archivos a 'docs/' o pasa '?pdf=docs/catalogo.pdf'.\n3) Respeta mayúsculas/minúsculas en el nombre del PDF."
+          "
+
+Solución rápida:
+1) Asegúrate de que el PDF esté en el MISMO directorio que index.html y se llame 'catalogo.pdf'.
+   O usa '?pdf=RUTA/AL/ARCHIVO.pdf' en la URL.
+2) Si usas carpeta 'docs/', mueve ambos archivos a 'docs/' o pasa '?pdf=docs/catalogo.pdf'.
+3) Respeta mayúsculas/minúsculas en el nombre del PDF."
         );
       }
     }
