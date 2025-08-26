@@ -12,6 +12,7 @@
     button{background:#1f2937;color:#fff;border:none;border-radius:6px;padding:.5rem 1rem;cursor:pointer}
     .toolbar{padding:.5rem;display:flex;gap:.5rem}
     .error{background:#7f1d1d;color:#fecaca;padding:.5rem;margin:.5rem;border-radius:6px}
+    .hint{color:#9ca3af;font-size:.9rem;padding:0 .75rem}
   </style>
 </head>
 <body>
@@ -23,6 +24,7 @@
   <div class="toolbar">
     <button id="prevBtn">⟵ Anterior</button>
     <button id="nextBtn">Siguiente ⟶</button>
+    <span class="hint">Si no pones PDF, buscará imágenes en <code>/pages/1.jpg..N.jpg</code> (como el demo de StPageFlip).</span>
   </div>
 
   <div id="flipbook"></div>
@@ -38,9 +40,16 @@
   <script src="https://unpkg.com/st-pageflip@2.0.7/dist/js/pageflip.min.js"></script>
 
   <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  </script>
+
+  <!-- PageFlip -->
+  <script src="https://unpkg.com/st-pageflip@2.0.7/dist/js/pageflip.min.js"></script>
+
+  <script>
     const params = new URLSearchParams(location.search);
     const PDF_PARAM = params.get("pdf");
-    const candidates = PDF_PARAM ? [PDF_PARAM] : ["catalogo.pdf","docs/catalogo.pdf"];
+    const IMG_COUNT_PARAM = parseInt(params.get("pages")||"0",10);
 
     const container = document.getElementById("flipbook");
     const prevBtn = document.getElementById("prevBtn");
@@ -49,22 +58,18 @@
 
     function showError(msg){ errorBox.style.display="block"; errorBox.textContent=msg; }
 
-    async function findPdf(){
-      for (const c of candidates){
-        try{
-          const r = await fetch(c,{method:"HEAD"});
-          if(r.ok) return c;
-        }catch(_){ }
-      }
-      throw new Error("No se encontró el archivo PDF en: "+candidates.join(", "));
+    async function exists(url){
+      try{ const r = await fetch(url,{method:"HEAD",cache:"no-cache"}); return r.ok; }catch(_){ return false; }
     }
 
-    async function renderPdf(pdfUrl){
+    // --- Opción A: PDF -> imágenes ---
+    async function pdfToImages(pdfUrl){
       const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
       const images = [];
+      const scale = 1.5;
       for(let p=1;p<=pdf.numPages;p++){
         const page = await pdf.getPage(p);
-        const viewport = page.getViewport({scale:1.5});
+        const viewport = page.getViewport({scale});
         const canvas=document.createElement("canvas");
         const ctx=canvas.getContext("2d");
         canvas.width=viewport.width; canvas.height=viewport.height;
@@ -74,12 +79,37 @@
       return images;
     }
 
+    // --- Opción B: Imágenes estáticas (como el demo de StPageFlip) ---
+    async function gatherImagePages(){
+      // Por defecto busca /pages/1.jpg..N.jpg ; si pages=12 en la URL, usará 1..12
+      const base = location.pathname.replace(/[^\/]*$/, '') + 'pages/';
+      const max = IMG_COUNT_PARAM || 12; // ajustable via ?pages=NN
+      const urls = [];
+      for (let i=1;i<=max;i++){
+        const url = base + i + '.jpg';
+        if (await exists(url)) urls.push(url);
+      }
+      if (urls.length === 0) throw new Error('No encontré imágenes en /pages/. Sube 1.jpg, 2.jpg, ... o pasa ?pdf=...');
+      return urls;
+    }
+
     async function init(){
       try{
-        const pdfUrl = await findPdf();
-        const images = await renderPdf(pdfUrl);
+        let images;
+        if (PDF_PARAM){
+          images = await pdfToImages(PDF_PARAM);
+        } else {
+          // si hay catalogo.pdf en raíz o docs/, úsalo; si no, intenta /pages/
+          const tryPdf = await exists('catalogo.pdf') ? 'catalogo.pdf' : (await exists('docs/catalogo.pdf') ? 'docs/catalogo.pdf' : null);
+          if (tryPdf){
+            images = await pdfToImages(tryPdf);
+          } else {
+            images = await gatherImagePages();
+          }
+        }
+
         const pageFlip = new St.PageFlip(container,{
-          width:800,height:1000,size:"stretch",minWidth:300,minHeight:400,showCover:true
+          width:800,height:1050,size:"stretch",minWidth:300,minHeight:400,showCover:true
         });
         pageFlip.loadFromImages(images);
 
