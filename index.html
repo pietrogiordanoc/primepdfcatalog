@@ -67,7 +67,18 @@
      * CONFIGURACIÓN
      * Coloca tu archivo PDF en el mismo directorio y nómbralo exactamente: catalogo.pdf
      */
-    const PDF_URL = "catalogo.pdf";
+    // Permite pasar ?pdf=RUTA al URL. Si no, intenta varias ubicaciones comunes.
+const params = new URLSearchParams(location.search);
+const PDF_PARAM = params.get("pdf");
+const CANDIDATES = PDF_PARAM ? [PDF_PARAM] : [
+  "catalogo.pdf",
+  "./catalogo.pdf",
+  "./docs/catalogo.pdf",
+  "docs/catalogo.pdf",
+  "./assets/catalogo.pdf",
+  "assets/catalogo.pdf"
+];
+let PDF_URL = null;
 
     const container = document.getElementById("flipbook");
     const prevBtn = document.getElementById("prevBtn");
@@ -117,53 +128,72 @@
       container.appendChild(frag);
     }
 
-    async function init(){
-      try {
-        // Pre-chequeo rápido: intentar hacer HEAD del PDF (aplica en servidores que lo permitan)
-        // En GitHub Pages no es critical: si falla igual seguimos y PDF.js avisará
-        try { await fetch(PDF_URL, { method: "HEAD", cache: "no-cache" }); } catch (_) {}
+    async function tryFetch(url){
+  try {
+    // HEAD no siempre está permitido; si falla seguimos con GET prueba mínima
+    let ok = false;
+    try {
+      const r = await fetch(url, { method: "HEAD", cache: "no-cache" });
+      ok = r.ok;
+    } catch(_) {}
+    if (!ok){
+      const r = await fetch(url, { method: "GET", cache: "no-cache" });
+      ok = r.ok;
+      // No consumimos el body completo para no descargarlo 2 veces; PDF.js lo hará
+    }
+    return ok;
+  } catch(_) { return false; }
+}
 
-        const images = await renderPdfToImages(PDF_URL);
-        makePageElements(images);
-
-        // Inicializa PageFlip
-        const pageFlip = new St.PageFlip(container, {
-          width: 800,     // tamaño base (se autoajusta con size:'stretch')
-          height: 1050,
-          size: "stretch",
-          minWidth: 320,
-          minHeight: 420,
-          maxShadowOpacity: 0.2,
-          showCover: true,
-          mobileScrollSupport: true,
-          usePortrait: true,
-          disableFlipByClick: false
-        });
-        pageFlip.loadFromHTML(document.querySelectorAll(".page"));
-
-        // Controles
-        prevBtn.onclick = () => pageFlip.flipPrev();
-        nextBtn.onclick = () => pageFlip.flipNext();
-        document.addEventListener("keydown", (e)=>{
-          if (e.key === "ArrowLeft") pageFlip.flipPrev();
-          if (e.key === "ArrowRight") pageFlip.flipNext();
-        });
-
-        // Control de estado de botones
-        function updateButtons(){
-          const state = pageFlip.getState();
-          prevBtn.disabled = state.page === 0;
-          nextBtn.disabled = state.page === state.pagesCount - 1;
-        }
-        pageFlip.on("flip", updateButtons);
-        updateButtons();
-      } catch (err){
-        console.error(err);
-        showError("Error: " + err.message + "\nAsegúrate de subir el archivo 'catalogo.pdf' y de que el sitio esté publicado (por ejemplo, en GitHub Pages)." );
-      }
+async function init(){
+  try {
+    // Encuentra la primera ruta válida
+    for (const cand of CANDIDATES){
+      const ok = await tryFetch(cand);
+      if (ok){ PDF_URL = cand; break; }
+    }
+    if (!PDF_URL){
+      throw new Error("No encontré el archivo del catálogo. Probé: " + CANDIDATES.join(", "));
     }
 
-    init();
+    const images = await renderPdfToImages(PDF_URL);
+    makePageElements(images);
+
+    const pageFlip = new St.PageFlip(container, {
+      width: 800,
+      height: 1050,
+      size: "stretch",
+      minWidth: 320,
+      minHeight: 420,
+      maxShadowOpacity: 0.2,
+      showCover: true,
+      mobileScrollSupport: true,
+      usePortrait: true,
+      disableFlipByClick: false
+    });
+    pageFlip.loadFromHTML(document.querySelectorAll(".page"));
+
+    prevBtn.onclick = () => pageFlip.flipPrev();
+    nextBtn.onclick = () => pageFlip.flipNext();
+    document.addEventListener("keydown", (e)=>{
+      if (e.key === "ArrowLeft") pageFlip.flipPrev();
+      if (e.key === "ArrowRight") pageFlip.flipNext();
+    });
+
+    function updateButtons(){
+      const state = pageFlip.getState();
+      prevBtn.disabled = state.page === 0;
+      nextBtn.disabled = state.page === state.pagesCount - 1;
+    }
+    pageFlip.on("flip", updateButtons);
+    updateButtons();
+  } catch (err){
+    console.error(err);
+    showError("Error: " + err.message + "\n\nSolución rápida:\n1) Asegúrate de que el PDF esté en el MISMO directorio que index.html y se llame 'catalogo.pdf'.\n   O usa '?pdf=RUTA/AL/ARCHIVO.pdf' en la URL.\n2) Si usas carpeta 'docs/', mueve ambos archivos a 'docs/' o pasa '?pdf=docs/catalogo.pdf'.\n3) Respeta mayúsculas/minúsculas en el nombre del PDF.");
+  }
+}
+
+init();
   </script>
 </body>
 </html>
