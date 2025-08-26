@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Catálogo – Flipbook</title>
-  <!-- PageFlip CSS -->
+  <!-- StPageFlip CSS -->
   <link rel="stylesheet" href="https://unpkg.com/st-pageflip@2.0.7/dist/css/pageflip.css" />
   <style>
     :root{--bg:#0f172a;--card:#111827;--text:#e5e7eb;--muted:#94a3b8}
@@ -22,12 +22,13 @@
     .hint{color:var(--muted);font-size:.9rem}
     .credit{color:#94a3b8;font-size:.8rem;text-align:center}
     .error{background:#7f1d1d;color:#fecaca;padding:.75rem 1rem;border-radius:10px}
+    a{color:#a5b4fc}
   </style>
 </head>
 <body>
   <header>
     <h1>Catálogo – Flipbook (prueba sin ISSUU)</h1>
-    <div class="hint">Sube tu PDF como <code>catalogo.pdf</code> en este mismo directorio.</div>
+    <div class="hint">Sube tu PDF como <code>catalogo.pdf</code> o usa <code>?pdf=ruta/al.pdf</code>.</div>
   </header>
 
   <main>
@@ -50,65 +51,71 @@
     </section>
   </main>
 
-  <!-- PDF.js -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js" integrity="sha512-1zM3m2QzSkxS6YxA7M2m0G2b2S+fU0a2bY5w2r4sH6Y8o8nKqR1q1i9nLk2kQ7jX9j8c5m2o2mS3p1u3f0z1hw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- ===================== PDF.js (versión estable v3 con worker externo) ===================== -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script>
-    // Asegura que el worker de PDF.js cargue desde CDN
+    // Configura la ruta del worker (misma versión) — necesario en GitHub Pages
     if (window.pdfjsLib) {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.worker.min.js";
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
     }
   </script>
 
-  <!-- PageFlip JS -->
+  <!-- StPageFlip JS -->
   <script src="https://unpkg.com/st-pageflip@2.0.7/dist/js/pageflip.min.js"></script>
 
   <script>
-    /**
-     * CONFIGURACIÓN
-     * Coloca tu archivo PDF en el mismo directorio y nómbralo exactamente: catalogo.pdf
-     */
-    // Permite pasar ?pdf=RUTA al URL. Si no, intenta varias ubicaciones comunes.
-const params = new URLSearchParams(location.search);
-const PDF_PARAM = params.get("pdf");
-const CANDIDATES = PDF_PARAM ? [PDF_PARAM] : [
-  "catalogo.pdf",
-  "./catalogo.pdf",
-  "./docs/catalogo.pdf",
-  "docs/catalogo.pdf",
-  "./assets/catalogo.pdf",
-  "assets/catalogo.pdf"
-];
-let PDF_URL = null;
+    /** Permitir ?pdf=RUTA. Si no, probar rutas comunes. **/
+    const params = new URLSearchParams(location.search);
+    const PDF_PARAM = params.get("pdf");
+    const CANDIDATES = PDF_PARAM ? [PDF_PARAM] : [
+      "catalogo.pdf",
+      "./catalogo.pdf",
+      "./docs/catalogo.pdf",
+      "docs/catalogo.pdf",
+      "./assets/catalogo.pdf",
+      "assets/catalogo.pdf"
+    ];
 
     const container = document.getElementById("flipbook");
     const prevBtn = document.getElementById("prevBtn");
     const nextBtn = document.getElementById("nextBtn");
     const errorBox = document.getElementById("errorBox");
 
-    /** Utilidades **/
     function showError(msg){
       errorBox.textContent = msg; errorBox.style.display = "block";
     }
 
+    async function tryFetch(url){
+      try {
+        // HEAD puede fallar en algunos servidores; si falla, prueba GET ligero.
+        let ok = false;
+        try {
+          const r = await fetch(url, { method: "HEAD", cache: "no-cache" });
+          ok = r.ok;
+        } catch(_) {}
+        if (!ok){
+          const r = await fetch(url, { method: "GET", cache: "no-cache" });
+          ok = r.ok;
+        }
+        return ok;
+      } catch(_) { return false; }
+    }
+
     async function renderPdfToImages(pdfUrl){
       if (!window.pdfjsLib) throw new Error("PDF.js no cargó correctamente.");
-      try {
-        const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
-        const images = [];
-        const scaleBase = 1.5; // calidad media/alta
-        for (let p=1; p<=pdf.numPages; p++){
-          const page = await pdf.getPage(p);
-          const viewport = page.getViewport({ scale: scaleBase });
-          const canvas = document.createElement("canvas");
-          const ctx = canvas.getContext("2d", { alpha:false });
-          canvas.width = viewport.width; canvas.height = viewport.height;
-          await page.render({ canvasContext: ctx, viewport }).promise;
-          images.push(canvas.toDataURL("image/jpeg", 0.92));
-        }
-        return images;
-      } catch (e){
-        throw new Error(e && e.message ? e.message : "No se pudo cargar el PDF.");
+      const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+      const images = [];
+      const scaleBase = 1.6; // calidad media/alta
+      for (let p=1; p<=pdf.numPages; p++){
+        const page = await pdf.getPage(p);
+        const viewport = page.getViewport({ scale: scaleBase });
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d", { alpha:false });
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        images.push(canvas.toDataURL("image/jpeg", 0.92));
       }
+      return images;
     }
 
     function makePageElements(imageUrls){
@@ -123,77 +130,62 @@ let PDF_URL = null;
         page.appendChild(img);
         frag.appendChild(page);
       });
-      // Limpia contenedor y añade páginas (requerido por PageFlip.loadFromHTML)
       container.innerHTML = "";
       container.appendChild(frag);
     }
 
-    async function tryFetch(url){
-  try {
-    // HEAD no siempre está permitido; si falla seguimos con GET prueba mínima
-    let ok = false;
-    try {
-      const r = await fetch(url, { method: "HEAD", cache: "no-cache" });
-      ok = r.ok;
-    } catch(_) {}
-    if (!ok){
-      const r = await fetch(url, { method: "GET", cache: "no-cache" });
-      ok = r.ok;
-      // No consumimos el body completo para no descargarlo 2 veces; PDF.js lo hará
+    async function init(){
+      try {
+        let pdfUrl = null;
+        for (const cand of CANDIDATES){
+          const ok = await tryFetch(cand);
+          if (ok){ pdfUrl = cand; break; }
+        }
+        if (!pdfUrl){
+          throw new Error("No encontré el archivo del catálogo. Probé: " + CANDIDATES.join(", "));
+        }
+
+        const images = await renderPdfToImages(pdfUrl);
+        makePageElements(images);
+
+        const pageFlip = new St.PageFlip(container, {
+          width: 800,
+          height: 1050,
+          size: "stretch",
+          minWidth: 320,
+          minHeight: 420,
+          maxShadowOpacity: 0.2,
+          showCover: true,
+          mobileScrollSupport: true,
+          usePortrait: true,
+          disableFlipByClick: false
+        });
+        pageFlip.loadFromHTML(document.querySelectorAll(".page"));
+
+        prevBtn.onclick = () => pageFlip.flipPrev();
+        nextBtn.onclick = () => pageFlip.flipNext();
+        document.addEventListener("keydown", (e)=>{
+          if (e.key === "ArrowLeft") pageFlip.flipPrev();
+          if (e.key === "ArrowRight") pageFlip.flipNext();
+        });
+
+        function updateButtons(){
+          const state = pageFlip.getState();
+          prevBtn.disabled = state.page === 0;
+          nextBtn.disabled = state.page === state.pagesCount - 1;
+        }
+        pageFlip.on("flip", updateButtons);
+        updateButtons();
+      } catch (err){
+        console.error(err);
+        showError(
+          "Error: " + err.message +
+          "\n\nSolución rápida:\n1) Asegúrate de que el PDF esté en el MISMO directorio que index.html y se llame 'catalogo.pdf'.\n   O usa '?pdf=RUTA/AL/ARCHIVO.pdf' en la URL.\n2) Si usas carpeta 'docs/', mueve ambos archivos a 'docs/' o pasa '?pdf=docs/catalogo.pdf'.\n3) Respeta mayúsculas/minúsculas en el nombre del PDF."
+        );
+      }
     }
-    return ok;
-  } catch(_) { return false; }
-}
 
-async function init(){
-  try {
-    // Encuentra la primera ruta válida
-    for (const cand of CANDIDATES){
-      const ok = await tryFetch(cand);
-      if (ok){ PDF_URL = cand; break; }
-    }
-    if (!PDF_URL){
-      throw new Error("No encontré el archivo del catálogo. Probé: " + CANDIDATES.join(", "));
-    }
-
-    const images = await renderPdfToImages(PDF_URL);
-    makePageElements(images);
-
-    const pageFlip = new St.PageFlip(container, {
-      width: 800,
-      height: 1050,
-      size: "stretch",
-      minWidth: 320,
-      minHeight: 420,
-      maxShadowOpacity: 0.2,
-      showCover: true,
-      mobileScrollSupport: true,
-      usePortrait: true,
-      disableFlipByClick: false
-    });
-    pageFlip.loadFromHTML(document.querySelectorAll(".page"));
-
-    prevBtn.onclick = () => pageFlip.flipPrev();
-    nextBtn.onclick = () => pageFlip.flipNext();
-    document.addEventListener("keydown", (e)=>{
-      if (e.key === "ArrowLeft") pageFlip.flipPrev();
-      if (e.key === "ArrowRight") pageFlip.flipNext();
-    });
-
-    function updateButtons(){
-      const state = pageFlip.getState();
-      prevBtn.disabled = state.page === 0;
-      nextBtn.disabled = state.page === state.pagesCount - 1;
-    }
-    pageFlip.on("flip", updateButtons);
-    updateButtons();
-  } catch (err){
-    console.error(err);
-    showError("Error: " + err.message + "\n\nSolución rápida:\n1) Asegúrate de que el PDF esté en el MISMO directorio que index.html y se llame 'catalogo.pdf'.\n   O usa '?pdf=RUTA/AL/ARCHIVO.pdf' en la URL.\n2) Si usas carpeta 'docs/', mueve ambos archivos a 'docs/' o pasa '?pdf=docs/catalogo.pdf'.\n3) Respeta mayúsculas/minúsculas en el nombre del PDF.");
-  }
-}
-
-init();
+    init();
   </script>
 </body>
 </html>
