@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Catálogo – Flipbook</title>
+  <!-- PageFlip CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/st-pageflip@2.0.7/dist/css/pageflip.css" />
+  <style>
+    :root{--bg:#0f172a;--card:#111827;--text:#e5e7eb;--muted:#94a3b8}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial}
+    header{padding:1rem 1.25rem;border-bottom:1px solid #1f2937;display:flex;gap:.75rem;align-items:center;justify-content:space-between}
+    header h1{font-size:1.1rem;margin:0;font-weight:600}
+    main{max-width:1200px;margin:0 auto;padding:1rem;display:grid;gap:1rem}
+    .viewer{background:var(--card);border-radius:16px;padding:1rem;display:grid;gap:1rem;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+    #flipbook{height:min(82vh,1000px)}
+    .toolbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:space-between}
+    .left, .right{display:flex;gap:.5rem;align-items:center}
+    button{appearance:none;background:#1f2937;color:var(--text);border:1px solid #374151;border-radius:10px;padding:.6rem .9rem;font-weight:600;cursor:pointer}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .hint{color:var(--muted);font-size:.9rem}
+    .credit{color:#94a3b8;font-size:.8rem;text-align:center}
+    .error{background:#7f1d1d;color:#fecaca;padding:.75rem 1rem;border-radius:10px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Catálogo – Flipbook (prueba sin ISSUU)</h1>
+    <div class="hint">Sube tu PDF como <code>catalogo.pdf</code> en este mismo directorio.</div>
+  </header>
+
+  <main>
+    <section class="viewer">
+      <div class="toolbar">
+        <div class="left">
+          <button id="prevBtn" title="Página anterior">⟵ Anterior</button>
+          <button id="nextBtn" title="Página siguiente">Siguiente ⟶</button>
+        </div>
+        <div class="right">
+          <span class="hint">Consejo: usa las flechas del teclado ◀ ▶</span>
+        </div>
+      </div>
+
+      <!-- Contenedor del flipbook -->
+      <div id="flipbook" aria-live="polite"></div>
+
+      <div class="credit">Hecho con <a href="https://mozilla.github.io/pdf.js/" target="_blank" rel="noreferrer">PDF.js</a> y <a href="https://nodlik.github.io/StPageFlip/" target="_blank" rel="noreferrer">StPageFlip</a>.</div>
+      <div id="errorBox" class="error" style="display:none"></div>
+    </section>
+  </main>
+
+  <!-- PDF.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js" integrity="sha512-1zM3m2QzSkxS6YxA7M2m0G2b2S+fU0a2bY5w2r4sH6Y8o8nKqR1q1i9nLk2kQ7jX9j8c5m2o2mS3p1u3f0z1hw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>
+    // Asegura que el worker de PDF.js cargue desde CDN
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.worker.min.js";
+    }
+  </script>
+
+  <!-- PageFlip JS -->
+  <script src="https://unpkg.com/st-pageflip@2.0.7/dist/js/pageflip.min.js"></script>
+
+  <script>
+    /**
+     * CONFIGURACIÓN
+     * Coloca tu archivo PDF en el mismo directorio y nómbralo exactamente: catalogo.pdf
+     */
+    const PDF_URL = "catalogo.pdf";
+
+    const container = document.getElementById("flipbook");
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const errorBox = document.getElementById("errorBox");
+
+    /** Utilidades **/
+    function showError(msg){
+      errorBox.textContent = msg; errorBox.style.display = "block";
+    }
+
+    async function renderPdfToImages(pdfUrl){
+      if (!window.pdfjsLib) throw new Error("PDF.js no cargó correctamente.");
+      try {
+        const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+        const images = [];
+        const scaleBase = 1.5; // calidad media/alta
+        for (let p=1; p<=pdf.numPages; p++){
+          const page = await pdf.getPage(p);
+          const viewport = page.getViewport({ scale: scaleBase });
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d", { alpha:false });
+          canvas.width = viewport.width; canvas.height = viewport.height;
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          images.push(canvas.toDataURL("image/jpeg", 0.92));
+        }
+        return images;
+      } catch (e){
+        throw new Error(e && e.message ? e.message : "No se pudo cargar el PDF.");
+      }
+    }
+
+    function makePageElements(imageUrls){
+      const frag = document.createDocumentFragment();
+      imageUrls.forEach((src, idx) => {
+        const page = document.createElement("div");
+        page.className = "page";
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.alt = `Página ${idx+1}`;
+        img.src = src;
+        page.appendChild(img);
+        frag.appendChild(page);
+      });
+      // Limpia contenedor y añade páginas (requerido por PageFlip.loadFromHTML)
+      container.innerHTML = "";
+      container.appendChild(frag);
+    }
+
+    async function init(){
+      try {
+        // Pre-chequeo rápido: intentar hacer HEAD del PDF (aplica en servidores que lo permitan)
+        // En GitHub Pages no es critical: si falla igual seguimos y PDF.js avisará
+        try { await fetch(PDF_URL, { method: "HEAD", cache: "no-cache" }); } catch (_) {}
+
+        const images = await renderPdfToImages(PDF_URL);
+        makePageElements(images);
+
+        // Inicializa PageFlip
+        const pageFlip = new St.PageFlip(container, {
+          width: 800,     // tamaño base (se autoajusta con size:'stretch')
+          height: 1050,
+          size: "stretch",
+          minWidth: 320,
+          minHeight: 420,
+          maxShadowOpacity: 0.2,
+          showCover: true,
+          mobileScrollSupport: true,
+          usePortrait: true,
+          disableFlipByClick: false
+        });
+        pageFlip.loadFromHTML(document.querySelectorAll(".page"));
+
+        // Controles
+        prevBtn.onclick = () => pageFlip.flipPrev();
+        nextBtn.onclick = () => pageFlip.flipNext();
+        document.addEventListener("keydown", (e)=>{
+          if (e.key === "ArrowLeft") pageFlip.flipPrev();
+          if (e.key === "ArrowRight") pageFlip.flipNext();
+        });
+
+        // Control de estado de botones
+        function updateButtons(){
+          const state = pageFlip.getState();
+          prevBtn.disabled = state.page === 0;
+          nextBtn.disabled = state.page === state.pagesCount - 1;
+        }
+        pageFlip.on("flip", updateButtons);
+        updateButtons();
+      } catch (err){
+        console.error(err);
+        showError("Error: " + err.message + "\nAsegúrate de subir el archivo 'catalogo.pdf' y de que el sitio esté publicado (por ejemplo, en GitHub Pages)." );
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
